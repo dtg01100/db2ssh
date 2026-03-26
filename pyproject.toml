@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "db2ssh"
-version = "0.1.0"
+version = "1.0.0"
 description = "Query IBM i Db2 databases over SSH — no ibm_db driver required"
 readme = "README.md"
 license = "MIT"

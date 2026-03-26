@@ -18,7 +18,7 @@ import paramiko
 import uuid
 import os
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 # DB-API 2.0 module-level attributes
 apilevel = "2.0"
