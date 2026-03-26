@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "db2ssh"
+version = "0.1.0"
+description = "Query IBM i Db2 databases over SSH — no ibm_db driver required"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.7"
+authors = [
+    {name = "dtg01100"},
+]
+keywords = ["db2", "ibm", "ibm-i", "ssh", "database", "sql", "as400"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "paramiko>=2.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/dtg01100/db2ssh"
+Repository = "https://github.com/dtg01100/db2ssh"
+Issues = "https://github.com/dtg01100/db2ssh/issues"
+
+[project.scripts]
+db2ssh = "db2ssh.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["db2ssh*"]

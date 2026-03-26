@@ -1,3 +1,5 @@
+"""db2ssh CLI — Run SQL queries on IBM i Db2 via SSH."""
+
 import paramiko
 import getpass
 import argparse
@@ -5,10 +7,13 @@ import os
 import sys
 import uuid
 
+from db2ssh import _parse_db2_output, _parse_error
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run a SQL query on IBM i Db2 via SSH using the qsh db2 command."
+        description="Query IBM i Db2 over SSH.",
+        prog="db2ssh",
     )
     parser.add_argument("--host", required=True, help="IBM i hostname or IP")
     parser.add_argument("--user", required=True, help="IBM i username")
@@ -39,7 +44,6 @@ def get_auth(args):
     key_file = args.key_file
 
     if not password and not key_file:
-        # Prompt for password, but allow empty (will try agent/keys)
         try:
             pw = getpass.getpass(
                 f"Password for {args.user}@{args.host} (enter to try key auth): "
@@ -61,19 +65,16 @@ def get_sql(args):
 def run_query(ssh, sql):
     remote_sql = f"/tmp/.db2ssh_{uuid.uuid4().hex}.sql"
 
-    # Write SQL to remote temp file
     escaped_sql = sql.replace("\\", "\\\\").replace("'", "'\\''")
     ssh.exec_command(f"printf '%s\\n' '{escaped_sql}' > {remote_sql}")
 
     try:
-        # Execute via qsh db2
         cmd = f'qsh -c "db2 -f {remote_sql}"'
         stdin, stdout, stderr = ssh.exec_command(cmd)
         output = stdout.read().decode()
         error = stderr.read().decode()
         exit_status = stdout.channel.recv_exit_status()
     finally:
-        # Always clean up the temp file, even if the query fails
         ssh.exec_command(f"rm -f {remote_sql}")
 
     return output, error, exit_status

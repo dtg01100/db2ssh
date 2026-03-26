@@ -1,10 +1,11 @@
 """
-DB-API 2.0 (PEP 249) driver for IBM i Db2 over SSH.
+db2ssh — Query IBM i Db2 databases over SSH.
 
-Uses the qsh 'db2' command on the IBM i via paramiko — no ibm_db needed.
+DB-API 2.0 (PEP 249) driver using paramiko and the remote 'db2' command.
+No ibm_db installation required.
 
 Usage:
-    from ibm_db_ssh import connect
+    from db2ssh import connect
     conn = connect(host="your-ibm-i.example.com", user="myuser", password="mypass")
     cur = conn.cursor()
     cur.execute("SELECT TABLE_NAME FROM QSYS2.SYSTABLES FETCH FIRST 5 ROWS ONLY")
@@ -15,14 +16,19 @@ Usage:
 
 import paramiko
 import uuid
+import os
+
+__version__ = "0.1.0"
 
 # DB-API 2.0 module-level attributes
 apilevel = "2.0"
-threadsafety = 1  # Threads may share the module, but not connections
-paramstyle = "qmark"  # Use ? for parameters (we'll implement substitution)
+threadsafety = 1
+paramstyle = "qmark"
 
 
-# DB-API 2.0 exceptions
+# --- DB-API 2.0 Exceptions ---
+
+
 class Warning(Exception):
     pass
 
@@ -59,15 +65,13 @@ class NotSupportedError(DatabaseError):
     pass
 
 
-def _parse_db2_output(output):
-    """Parse db2 -S output into (description, rows).
+# --- Output Parsing ---
 
-    description: list of column name strings
-    rows: list of tuples of string values
-    """
+
+def _parse_db2_output(output):
+    """Parse db2 columnar output into (description, rows)."""
     lines = output.splitlines()
 
-    # Find the separator line (all dashes and spaces)
     sep_idx = None
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -81,33 +85,29 @@ def _parse_db2_output(output):
     sep_line = lines[sep_idx]
     header_line = lines[sep_idx - 1] if sep_idx > 0 else ""
 
-    # Extract column start positions from separator line
     col_starts = []
-    i = 0
-    while i < len(sep_line):
-        if sep_line[i] == "-":
-            col_starts.append(i)
-            while i < len(sep_line) and sep_line[i] == "-":
-                i += 1
+    j = 0
+    while j < len(sep_line):
+        if sep_line[j] == "-":
+            col_starts.append(j)
+            while j < len(sep_line) and sep_line[j] == "-":
+                j += 1
         else:
-            i += 1
+            j += 1
 
     if not col_starts:
         return [], []
 
-    # Build column boundary slices: (start, end_or_None)
     col_slices = []
-    for j, start in enumerate(col_starts):
-        end = col_starts[j + 1] if j + 1 < len(col_starts) else None
+    for k, start in enumerate(col_starts):
+        end = col_starts[k + 1] if k + 1 < len(col_starts) else None
         col_slices.append((start, end))
 
-    # Extract column names from header line
     description = []
     for start, end in col_slices:
         name = header_line[start:end].strip() if start < len(header_line) else ""
         description.append(name)
 
-    # Extract data rows (everything between separator and trailing whitespace/count)
     rows = []
     for line in lines[sep_idx + 1 :]:
         stripped = line.strip()
@@ -138,7 +138,7 @@ def _parse_error(output):
 
 
 def _qmark_to_positional(sql, params):
-    """Replace ? placeholders with positional format for safe shell escaping."""
+    """Replace ? placeholders with escaped literal values."""
     if not params:
         return sql, []
     parts = sql.split("?")
@@ -146,7 +146,6 @@ def _qmark_to_positional(sql, params):
         raise ProgrammingError(
             f"Expected {len(parts) - 1} parameters, got {len(params)}"
         )
-    # Build the SQL with literal values (qsh db2 doesn't support parameterized queries natively)
     result = parts[0]
     for i, param in enumerate(params):
         if param is None:
@@ -163,12 +162,37 @@ def _qmark_to_positional(sql, params):
     return result, []
 
 
+# --- SSH Query Execution ---
+
+
+def _run_query(ssh, sql):
+    """Execute SQL on IBM i via qsh db2. Returns (output, error, exit_status)."""
+    remote_sql = f"/tmp/.db2ssh_{uuid.uuid4().hex}.sql"
+
+    escaped_sql = sql.replace("\\", "\\\\").replace("'", "'\\''")
+    ssh.exec_command(f"printf '%s\\n' '{escaped_sql}' > {remote_sql}")
+
+    try:
+        cmd = f'qsh -c "db2 -f {remote_sql}"'
+        stdin, stdout, stderr = ssh.exec_command(cmd)
+        output = stdout.read().decode()
+        error = stderr.read().decode()
+        exit_status = stdout.channel.recv_exit_status()
+    finally:
+        ssh.exec_command(f"rm -f {remote_sql}")
+
+    return output, error, exit_status
+
+
+# --- DB-API 2.0 Cursor ---
+
+
 class Cursor:
     """DB-API 2.0 cursor for IBM i Db2 over SSH."""
 
-    description = None  # PEP 249: sequence of 7-item sequences after execute()
-    rowcount = -1  # PEP 249: number of rows produced/affected
-    arraysize = 1  # PEP 249: default fetchmany size
+    description = None
+    rowcount = -1
+    arraysize = 1
 
     def __init__(self, connection):
         self._connection = connection
@@ -185,19 +209,7 @@ class Cursor:
             operation, _ = _qmark_to_positional(operation, parameters)
 
         ssh = self._connection._ssh
-        remote_sql = f"/tmp/.db2ssh_{uuid.uuid4().hex}.sql"
-
-        escaped_sql = operation.replace("\\", "\\\\").replace("'", "'\\''")
-        ssh.exec_command(f"printf '%s\\n' '{escaped_sql}' > {remote_sql}")
-
-        try:
-            cmd = f'qsh -c "db2 -f {remote_sql}"'
-            stdin, stdout, stderr = ssh.exec_command(cmd)
-            output = stdout.read().decode()
-            exit_status = stdout.channel.recv_exit_status()
-        finally:
-            # Always clean up the temp file, even if the query fails
-            ssh.exec_command(f"rm -f {remote_sql}")
+        output, error, exit_status = _run_query(ssh, operation)
 
         if exit_status != 0:
             msg = _parse_error(output)
@@ -205,7 +217,6 @@ class Cursor:
 
         desc, rows = _parse_db2_output(output)
 
-        # Build PEP 249 description: (name, type_code, display_size, internal_size, precision, scale, null_ok)
         self.description = (
             [(name, None, None, None, None, None, None) for name in desc]
             if desc
@@ -245,10 +256,10 @@ class Cursor:
         self.description = None
 
     def setinputsizes(self, sizes):
-        pass  # Not applicable
+        pass
 
     def setoutputsize(self, size, column=None):
-        pass  # Not applicable
+        pass
 
     def __iter__(self):
         return self
@@ -258,6 +269,9 @@ class Cursor:
         if row is None:
             raise StopIteration
         return row
+
+
+# --- DB-API 2.0 Connection ---
 
 
 class Connection:
@@ -293,7 +307,7 @@ class Connection:
         return Cursor(self)
 
     def commit(self):
-        pass  # IBM i autocommit behavior depends on job config
+        pass
 
     def rollback(self):
         raise NotSupportedError("Rollback not supported over SSH db2 interface")
@@ -308,6 +322,9 @@ class Connection:
 
     def __exit__(self, *args):
         self.close()
+
+
+# --- Public API ---
 
 
 def connect(
@@ -331,17 +348,12 @@ def connect(
         port: SSH port (default 22)
         timeout: connection timeout in seconds (default 10)
     """
-    import os
-
     if password is None:
         password = os.environ.get("DB2_PASSWORD")
     if password == "":
         password = None
     if not user:
         raise InterfaceError("user is required")
-    if not password and not key_filename:
-        # Let paramiko try agent and default keys
-        pass
     return Connection(
         host,
         user,

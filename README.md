@@ -1,4 +1,4 @@
-# ibm-db-ssh
+# db2ssh
 
 Query IBM i Db2 databases over SSH — no `ibm_db` driver required.
 
@@ -9,16 +9,13 @@ The `ibm_db` Python driver bundles IBM's proprietary ODBC/CLI libraries, which c
 ## Requirements
 
 - Python 3.7+
-- [paramiko](https://www.paramiko.org/) (installed automatically with pip)
 - SSH access to the target IBM i system
 
 ## Installation
 
 ```
-pip install paramiko
+pip install db2ssh
 ```
-
-Then copy `ibm_db_ssh.py` and/or `ssh_query_runner.py` into your project.
 
 ## Usage
 
@@ -27,7 +24,7 @@ Then copy `ibm_db_ssh.py` and/or `ssh_query_runner.py` into your project.
 Drop-in replacement pattern for code that expects a PEP 249 database interface:
 
 ```python
-from ibm_db_ssh import connect
+from db2ssh import connect
 
 conn = connect(host="your-ibm-i.example.com", user="myuser", password="mypass")
 
@@ -63,27 +60,29 @@ conn = connect(host="your-ibm-i.example.com", user="myuser")
 
 ### CLI Tool
 
+After `pip install db2ssh`, the `db2ssh` command is available:
+
 ```bash
 # Password auth
-python ssh_query_runner.py --host your-ibm-i.example.com --user myuser --password mypass \
+db2ssh --host your-ibm-i.example.com --user myuser --password mypass \
   --query "SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 5 ROWS ONLY"
 
 # Key-based auth
-python ssh_query_runner.py --host your-ibm-i.example.com --user myuser \
+db2ssh --host your-ibm-i.example.com --user myuser \
   --key-file ~/.ssh/id_rsa \
   --query "SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 5 ROWS ONLY"
 
 # From a SQL file
-python ssh_query_runner.py --host your-ibm-i.example.com --user myuser --password mypass \
+db2ssh --host your-ibm-i.example.com --user myuser --password mypass \
   --file queries.sql
 
 # Save output to file
-python ssh_query_runner.py --host your-ibm-i.example.com --user myuser --password mypass \
+db2ssh --host your-ibm-i.example.com --user myuser --password mypass \
   --query "SELECT * FROM QSYS2.SYSTABLES" --output results.txt
 
 # Password via environment variable
 export DB2_PASSWORD=mypass
-python ssh_query_runner.py --host your-ibm-i.example.com --user myuser \
+db2ssh --host your-ibm-i.example.com --user myuser \
   --query "SELECT CURRENT_DATE FROM SYSIBM.SYSDUMMY1"
 ```
 
@@ -120,7 +119,7 @@ No software needs to be installed on the IBM i beyond its default SSH server and
 All errors from the IBM i are raised as DB-API 2.0 exceptions:
 
 ```python
-from ibm_db_ssh import connect, ProgrammingError, OperationalError
+from db2ssh import connect, ProgrammingError, OperationalError
 
 try:
     conn = connect(host="bad-host", user="user", password="pass")
